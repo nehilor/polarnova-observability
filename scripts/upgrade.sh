@@ -1,27 +1,18 @@
 #!/usr/bin/env bash
-# Soft-upgrade helper: pull pinned images from .env and recreate containers.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 if [[ ! -f .env ]]; then
-  echo "Missing .env — copy from .env.example and generate secrets first."
+  echo "Missing .env — create from .env.example / Coolify env first." >&2
   exit 1
 fi
 
-echo "==> Pulling images"
+echo "==> Pull"
 docker compose pull
-
-echo "==> Recreating stack"
+echo "==> Recreate"
 docker compose up -d --remove-orphans
-
-echo "==> Waiting for health"
-sleep 15
+echo "==> Wait"
+sleep 20
 ./scripts/health-check.sh
-
-echo ""
-echo "After upgrade:"
-echo "  1. Confirm SigNoz UI loads"
-echo "  2. Confirm schema-migrator exited 0: docker logs pn-obs-schema-migrator"
-echo "  3. Send a test trace from any instrumented app"

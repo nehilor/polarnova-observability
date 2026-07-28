@@ -1,66 +1,71 @@
 #!/usr/bin/env bash
-# Backup ClickHouse databases used by SigNoz.
-# Uses native clickhouse-client INSIDE the clickhouse container.
+# Logical ClickHouse backup (requires stop of writers for consistency — see docs).
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck disable=SC1091
-[[ -f "${ROOT_DIR}/.env" ]] && source "${ROOT_DIR}/.env"
+cd "${ROOT_DIR}"
+
+if [[ -f "${ROOT_DIR}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${ROOT_DIR}/.env"
+  set +a
+fi
 
 BACKUP_ROOT="${BACKUP_ROOT:-${ROOT_DIR}/backups}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
-CONTAINER="${CLICKHOUSE_CONTAINER:-pn-obs-clickhouse}"
+SERVICE="${CLICKHOUSE_SERVICE:-clickhouse}"
 DATABASES="${CLICKHOUSE_BACKUP_DATABASES:-signoz_traces,signoz_metrics,signoz_logs,signoz_metadata,signoz_meter}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DEST="${BACKUP_ROOT}/clickhouse/${STAMP}"
+COMPOSE=(docker compose)
+
+if ! "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx "${SERVICE}"; then
+  echo "ERROR: service '${SERVICE}' is not running" >&2
+  exit 1
+fi
 
 mkdir -p "${DEST}"
-
-echo "==> ClickHouse backup → ${DEST}"
+echo "==> ClickHouse logical backup → ${DEST}"
+echo "    NOTE: For consistent snapshots, stop otel-collector first (see BACKUP_AND_RESTORE.md)."
 
 IFS=',' read -ra DB_LIST <<< "${DATABASES}"
 for db in "${DB_LIST[@]}"; do
   db="$(echo "${db}" | xargs)"
   [[ -z "${db}" ]] && continue
-  echo "  • dumping database: ${db}"
+  echo "  • database: ${db}"
   mkdir -p "${DEST}/${db}"
-  # Export each table as Native format for efficient restore
-  tables="$(docker exec "${CONTAINER}" clickhouse-client --query "SHOW TABLES FROM ${db}" || true)"
+  tables="$("${COMPOSE[@]}" exec -T "${SERVICE}" clickhouse-client --query "SHOW TABLES FROM ${db}" 2>/dev/null || true)"
   if [[ -z "${tables}" ]]; then
-    echo "    (no tables or database missing — skipping)"
+    echo "    (no tables — skipping)"
     continue
   fi
   while IFS= read -r table; do
     [[ -z "${table}" ]] && continue
-    # Skip distributed / materialized views when dumping base data is preferred
-    engine="$(docker exec "${CONTAINER}" clickhouse-client --query "SELECT engine FROM system.tables WHERE database='${db}' AND name='${table}'")"
+    engine="$("${COMPOSE[@]}" exec -T "${SERVICE}" clickhouse-client --query "SELECT engine FROM system.tables WHERE database='${db}' AND name='${table}'")"
     case "${engine}" in
       Distributed|MaterializedView|View|Dictionary)
         echo "    - skip ${table} (${engine})"
         continue
         ;;
     esac
-    outfile="${DEST}/${db}/${table}.native.gz"
     echo "    - ${table}"
-    docker exec "${CONTAINER}" clickhouse-client \
+    "${COMPOSE[@]}" exec -T "${SERVICE}" clickhouse-client \
       --query "SELECT * FROM ${db}.${table} FORMAT Native" \
-      | gzip -c > "${outfile}"
+      | gzip -c > "${DEST}/${db}/${table}.native.gz"
   done <<< "${tables}"
 done
 
-# Metadata sidecar
 cat > "${DEST}/manifest.json" <<EOF
 {
   "timestamp": "${STAMP}",
-  "container": "${CONTAINER}",
+  "service": "${SERVICE}",
   "databases": "${DATABASES}",
-  "host": "$(hostname)",
-  "type": "clickhouse-native-dump"
+  "type": "clickhouse-native-dump",
+  "consistent": false,
+  "note": "Stop otel-collector before backup for crash-consistent data"
 }
 EOF
 
-# Prune old backups
 find "${BACKUP_ROOT}/clickhouse" -mindepth 1 -maxdepth 1 -type d -mtime "+${RETENTION_DAYS}" -exec rm -rf {} + 2>/dev/null || true
-
-echo "==> Backup complete: ${DEST}"
-echo "    Size: $(du -sh "${DEST}" | awk '{print $1}')"
+echo "==> Complete ($(du -sh "${DEST}" | awk '{print $1}'))"

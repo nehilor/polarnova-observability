@@ -6,7 +6,7 @@ Background work must share the same OTLP endpoint and **propagate trace context*
 
 ```bash
 OTEL_SERVICE_NAME=foodiiz-worker
-OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.polarnova.io
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.namespace=polarnova
 ```

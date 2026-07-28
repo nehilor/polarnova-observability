@@ -1,62 +1,32 @@
-# Architecture
+# Architecture (current)
 
-## Design goals
-
-1. **Single pane of glass** for all PolarNova products (APM + traces + metrics + logs + alerts).
-2. **OpenTelemetry-native** ingestion — vendor-neutral SDKs in every app.
-3. **Self-hosted** — data never leaves PolarNova infrastructure.
-4. **Coolify-friendly** — one Git repo, one Compose file, domain mapping, TLS at the edge.
-5. **Operable** — backups, health checks, pinned versions, resource limits.
-
-## Data path
+SigNoz **Foundry-aligned** single-node Compose for Coolify:
 
 ```
-App SDK ──OTLP──▶ OTel Collector ──▶ ClickHouse ◀── SigNoz Query/UI
-                       │
-                       ├── processors: memory_limiter, filter, attributes, batch
-                       ├── spanmetrics → RED metrics derived from traces
-                       └── prometheus scrape → node-exporter / cAdvisor / ClickHouse
+Apps ──OTLP (private)──▶ otel-collector ──▶ clickhouse ◀── signoz
+                              │                 ▲
+                              │          clickhouse-keeper
+                         postgres (metastore)
+uptime-kuma (synthetic, separate)
 ```
 
 ## Why these components
 
-| Choice | Rationale |
-|--------|-----------|
-| SigNoz | Unified OSS alternative to Datadog; ClickHouse-backed; OTel-first |
-| SigNoz OTel Collector | Correct ClickHouse exporters + schema awareness |
-| ClickHouse | High ingest, fast analytical queries, proven with SigNoz |
-| Zookeeper | Required for SigNoz replicated table coordination in this layout |
-| Uptime Kuma | Lightweight synthetic monitoring (HTTP/SSL/TCP) without Grafana |
-| SQLite for SigNoz metadata | Simple Coolify ops; volume-backed; adequate for single-node |
+| Component | Source of truth |
+|-----------|-----------------|
+| ClickHouse Keeper | SigNoz Foundry default telemetry keeper |
+| PostgreSQL metastore | SigNoz Foundry default (replaces SQLite) |
+| Schema migrator | `migrate ready/bootstrap/sync/async` |
+| No Grafana/Loki/Jaeger | SigNoz covers UI/query |
 
-## What we deliberately excluded
+## Coolify networking
 
-- **Grafana / Loki / Tempo / Jaeger** — duplicated by SigNoz.
-- **SaaS APM** — out of scope (self-hosted only).
-- **Enterprise-only features** — stack stays on community images.
-
-## Networks
-
-- `polarnova-observability` (bridge): all stack services.
-- Application containers on other Coolify projects should either:
-  - Export OTLP to `https://otel.polarnova.io`, or
-  - Join a shared Docker network and use `http://otel-collector:4318` (same host only).
-
-## Failure domains
-
-| Failure | Impact | Mitigation |
-|---------|--------|------------|
-| Collector down | Ingest stops; apps buffer briefly then drop | Healthchecks + Uptime monitor + restart policy |
-| ClickHouse down | Ingest + queries fail | Volume backups, disk alerts, resource limits |
-| SigNoz UI down | Visibility lost; ingest may continue | Independent of collector health |
-| Zookeeper down | ClickHouse coordination issues | Restart policy; restore ZK volume |
+- No custom `networks:` in compose (Coolify + Traefik attach their network).
+- Public UI via `expose: "8080"` on `signoz` + domain in Coolify UI.
+- OTLP not published on `0.0.0.0`.
 
 ## Scaling path
 
-Current: single-node Compose (startup / multi-product).
-
-Next steps when ingest grows:
-
-1. Increase ClickHouse disk + memory; tighten retention.
-2. Run a gateway collector per product cluster; forward to central SigNoz.
-3. Move to SigNoz Foundry / Kubernetes HA ClickHouse when a single node saturates.
+1. Tighten retention / disk  
+2. Gateway collectors per product cluster → central `otel-collector`  
+3. Foundry/K8s HA when single node saturates  

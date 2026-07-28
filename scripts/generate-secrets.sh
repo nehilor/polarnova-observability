@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate production secrets for PolarNova Observability.
+# Generate production secrets into .env (local) — for Coolify, paste values in the UI.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,18 +14,24 @@ gen() {
   openssl rand -base64 48 | tr -d '\n' | tr '+/' '-_'
 }
 
-NEW_JWT="$(gen)"
-
-if grep -q 'SIGNOZ_JWT_SECRET=CHANGE_ME' "${ENV_FILE}"; then
-  # portable in-place replace
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    sed -i '' "s|SIGNOZ_JWT_SECRET=CHANGE_ME_TO_A_LONG_RANDOM_STRING|SIGNOZ_JWT_SECRET=${NEW_JWT}|" "${ENV_FILE}"
+replace_placeholder() {
+  local key="$1"
+  local placeholder_regex="$2"
+  local value="$3"
+  if grep -qE "^${key}=${placeholder_regex}" "${ENV_FILE}"; then
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      sed -i '' -E "s|^${key}=${placeholder_regex}|${key}=${value}|" "${ENV_FILE}"
+    else
+      sed -i -E "s|^${key}=${placeholder_regex}|${key}=${value}|" "${ENV_FILE}"
+    fi
+    echo "${key} generated"
   else
-    sed -i "s|SIGNOZ_JWT_SECRET=CHANGE_ME_TO_A_LONG_RANDOM_STRING|SIGNOZ_JWT_SECRET=${NEW_JWT}|" "${ENV_FILE}"
+    echo "${key} already set — left unchanged"
   fi
-  echo "SIGNOZ_JWT_SECRET generated and written to .env"
-else
-  echo "SIGNOZ_JWT_SECRET already set — left unchanged"
-fi
+}
 
-echo "Done. Review ${ENV_FILE} before deploying."
+replace_placeholder "SIGNOZ_JWT_SECRET" "CHANGE_ME_.*" "$(gen)"
+replace_placeholder "POSTGRES_PASSWORD" "CHANGE_ME_.*" "$(gen)"
+
+echo "Done. Review ${ENV_FILE} locally; configure Coolify env vars separately."
+echo "Do not commit .env."

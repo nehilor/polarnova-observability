@@ -1,67 +1,52 @@
 #!/usr/bin/env bash
-# Restore ClickHouse databases from a native dump created by backup-clickhouse.sh
-#
-# Usage:
-#   ./scripts/restore-clickhouse.sh backups/clickhouse/20260728T120000Z
-#
-# WARNING: This overwrites matching tables. Stop writers (otel-collector) first.
+# Restore ClickHouse native dumps. Stops otel-collector during restore.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck disable=SC1091
-[[ -f "${ROOT_DIR}/.env" ]] && source "${ROOT_DIR}/.env"
+cd "${ROOT_DIR}"
 
 BACKUP_DIR="${1:-}"
-CONTAINER="${CLICKHOUSE_CONTAINER:-pn-obs-clickhouse}"
+SERVICE="${CLICKHOUSE_SERVICE:-clickhouse}"
+COMPOSE=(docker compose)
 
 if [[ -z "${BACKUP_DIR}" || ! -d "${BACKUP_DIR}" ]]; then
-  echo "Usage: $0 <backup-directory>"
-  echo "Example: $0 backups/clickhouse/20260728T120000Z"
+  echo "Usage: $0 <backup-directory>" >&2
   exit 1
 fi
-
 if [[ ! -f "${BACKUP_DIR}/manifest.json" ]]; then
-  echo "ERROR: manifest.json not found in ${BACKUP_DIR}"
+  echo "ERROR: manifest.json missing in ${BACKUP_DIR}" >&2
   exit 1
 fi
 
-echo "==> Restoring ClickHouse from ${BACKUP_DIR}"
-echo "    Target container: ${CONTAINER}"
-echo ""
-read -r -p "This may overwrite existing tables. Continue? [y/N] " confirm
+echo "==> Restoring from ${BACKUP_DIR}"
+read -r -p "Overwrite matching tables? [y/N] " confirm
 [[ "${confirm}" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }
 
-# Prefer stopping the collector to avoid concurrent writes
-if docker ps --format '{{.Names}}' | grep -q '^pn-obs-otel-collector$'; then
-  echo "==> Stopping otel-collector during restore"
-  docker stop pn-obs-otel-collector >/dev/null
+RESTART_COLLECTOR=0
+if "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx otel-collector; then
+  echo "==> Stopping otel-collector"
+  "${COMPOSE[@]}" stop otel-collector
   RESTART_COLLECTOR=1
-else
-  RESTART_COLLECTOR=0
 fi
 
 for db_dir in "${BACKUP_DIR}"/*/; do
   [[ -d "${db_dir}" ]] || continue
   db="$(basename "${db_dir}")"
-  echo "  • database: ${db}"
-  docker exec "${CONTAINER}" clickhouse-client --query "CREATE DATABASE IF NOT EXISTS ${db}"
-
+  echo "  • ${db}"
+  "${COMPOSE[@]}" exec -T "${SERVICE}" clickhouse-client --query "CREATE DATABASE IF NOT EXISTS ${db}"
   for dump in "${db_dir}"*.native.gz; do
     [[ -f "${dump}" ]] || continue
     table="$(basename "${dump}" .native.gz)"
-    echo "    - restoring ${table}"
-    # Truncate then insert (table must already exist from schema migrator)
-    docker exec "${CONTAINER}" clickhouse-client --query "TRUNCATE TABLE IF EXISTS ${db}.${table}" || true
-    gunzip -c "${dump}" | docker exec -i "${CONTAINER}" clickhouse-client \
-      --query "INSERT INTO ${db}.${table} FORMAT Native" || {
-        echo "      WARN: restore failed for ${db}.${table} (engine may not support TRUNCATE/INSERT)"
-      }
+    echo "    - ${table}"
+    "${COMPOSE[@]}" exec -T "${SERVICE}" clickhouse-client --query "TRUNCATE TABLE IF EXISTS ${db}.${table}" || true
+    if ! gunzip -c "${dump}" | "${COMPOSE[@]}" exec -T "${SERVICE}" clickhouse-client \
+      --query "INSERT INTO ${db}.${table} FORMAT Native"; then
+      echo "      WARN: failed ${db}.${table}" >&2
+    fi
   done
 done
 
 if [[ "${RESTART_COLLECTOR}" -eq 1 ]]; then
-  echo "==> Starting otel-collector"
-  docker start pn-obs-otel-collector >/dev/null
+  "${COMPOSE[@]}" start otel-collector
 fi
-
 echo "==> Restore finished"

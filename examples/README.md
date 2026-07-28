@@ -12,4 +12,4 @@ Copy these bootstraps into each product repository. They are reference snippets,
 | `nextjs/` | Next.js |
 | `otel-smoke-trace.json` | curl smoke against OTLP HTTP |
 
-Always set `OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.polarnova.io` in production.
+Always set `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318` in production.

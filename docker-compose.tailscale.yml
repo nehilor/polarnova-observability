@@ -1,0 +1,18 @@
+###############################################################################
+# Optional override: publish OTLP ONLY on the Tailscale interface
+#
+# Usage (SSH on observability VPS — not required for Coolify Git deploy):
+#   export OTLP_BIND_HOST="$(tailscale ip -4)"
+#   docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+#
+# In Coolify: prefer mapping ports in the UI to the Tailscale IP, or merge
+# this file only if you control the compose command.
+#
+# NEVER set OTLP_BIND_HOST=0.0.0.0
+###############################################################################
+
+services:
+  otel-collector:
+    ports:
+      - "${OTLP_BIND_HOST:?Set OTLP_BIND_HOST to this host Tailscale IPv4}:4317:4317"
+      - "${OTLP_BIND_HOST}:4318:4318"

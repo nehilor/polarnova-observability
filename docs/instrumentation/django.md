@@ -18,7 +18,7 @@ opentelemetry-bootstrap -a install
 
 ```bash
 export OTEL_SERVICE_NAME=vital-ai-api   # example
-export OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.polarnova.io
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 
 opentelemetry-instrument gunicorn myproject.wsgi:application

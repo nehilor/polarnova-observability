@@ -45,7 +45,7 @@ See `examples/nestjs/otel.ts`.
 
 ```bash
 OTEL_SERVICE_NAME=voxpilot-api
-OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.polarnova.io
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.namespace=polarnova
 ```

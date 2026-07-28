@@ -6,7 +6,7 @@
  *
  * Env:
  *   OTEL_SERVICE_NAME=aidrop-api
- *   OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.polarnova.io
+ *   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
  *   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
  */
 

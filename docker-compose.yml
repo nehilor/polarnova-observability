@@ -1,24 +1,20 @@
 ###############################################################################
 # PolarNova Observability Platform
-# Production Docker Compose — designed for Coolify (Docker Compose) deployment
+# Coolify v4 · Docker Compose · Ubuntu VPS · Traefik (Coolify-managed)
 #
-# Stack:
-#   - SigNoz UI + API          (APM, traces, metrics, logs, alerts)
-#   - OpenTelemetry Collector  (OTLP ingestion → ClickHouse)
-#   - ClickHouse               (telemetry storage)
-#   - Zookeeper                (ClickHouse coordination)
-#   - Schema Migrator          (ClickHouse schema bootstrap)
-#   - Uptime Kuma              (HTTP/SSL/TCP/keyword health checks)
+# Architecture aligned with SigNoz Foundry (post-v0.130):
+#   ClickHouse 25.12.5 + ClickHouse Keeper + PostgreSQL metastore
+#   SigNoz UI/API + SigNoz OTel Collector (ingester) + schema migrator
+#   Uptime Kuma (synthetic checks — separate from APM)
 #
-# Optional profile "infra":
-#   - Node Exporter            (host metrics)
-#   - cAdvisor                 (container metrics)
+# Coolify notes (official docs):
+#   - Do NOT declare a custom Docker network (breaks Traefik routing).
+#   - Do NOT publish host ports for the public UI — use expose + domain.
+#   - Assign domain as https://observe.polarnova.io:8080 on service "signoz".
+#   - OTLP must NOT be public — no 0.0.0.0 publish; use Tailscale (see docs).
 #
-# Exposed ports (Coolify reverse-proxy / TLS terminates in front):
-#   8080  → SigNoz UI          → observe.polarnova.io
-#   3001  → Uptime Kuma        → uptime.polarnova.io
-#   4317  → OTLP gRPC          → otel.polarnova.io:4317 (or TCP proxy)
-#   4318  → OTLP HTTP          → otel.polarnova.io (HTTPS → 4318)
+# NOT included (by design): Grafana, Loki, Jaeger, GlitchTip, Prometheus server,
+# Node Exporter, cAdvisor (privileged).
 ###############################################################################
 
 name: polarnova-observability
@@ -26,24 +22,26 @@ name: polarnova-observability
 x-logging: &default-logging
   driver: json-file
   options:
-    max-size: "50m"
-    max-file: "5"
+    max-size: "20m"
+    max-file: "3"
 
-x-restart: &default-restart
-  restart: unless-stopped
+x-security: &default-security
+  security_opt:
+    - no-new-privileges:true
 
 services:
   # ---------------------------------------------------------------------------
-  # Init: download ClickHouse histogramQuantile UDF binary (SigNoz APM)
+  # One-shot: histogramQuantile UDF for SigNoz APM
   # ---------------------------------------------------------------------------
   init-clickhouse:
-    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-25.5.6}
-    container_name: pn-obs-init-clickhouse
-    restart: on-failure
-    networks:
-      - observability
+    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-25.12.5}
+    restart: "no"
+    <<: *default-security
+    # One-shot job: exits 0. In Coolify UI, exclude from stack health if prompted.
+    labels:
+      polarnova.io/oneshot: "true"
     volumes:
-      - ./config/clickhouse/user_scripts:/var/lib/clickhouse/user_scripts/
+      - clickhouse-user-scripts:/var/lib/clickhouse/user_scripts
     command:
       - bash
       - -c
@@ -68,181 +66,203 @@ services:
     logging: *default-logging
 
   # ---------------------------------------------------------------------------
-  # Zookeeper — ClickHouse cluster coordination / replicated table metadata
+  # ClickHouse Keeper (Foundry default telemetry keeper — replaces ZooKeeper)
   # ---------------------------------------------------------------------------
-  zookeeper:
-    image: signoz/zookeeper:${ZOOKEEPER_VERSION:-3.7.1}
-    container_name: pn-obs-zookeeper
-    <<: *default-restart
-    user: root
-    networks:
-      - observability
+  clickhouse-keeper:
+    image: clickhouse/clickhouse-keeper:${CLICKHOUSE_VERSION:-25.12.5}
+    restart: unless-stopped
+    <<: *default-security
+    entrypoint:
+      - /usr/bin/clickhouse-keeper
+      - --config-file=/etc/clickhouse-keeper/keeper.yaml
     volumes:
-      - zookeeper-data:/bitnami/zookeeper
-    environment:
-      ZOO_SERVER_ID: "1"
-      ALLOW_ANONYMOUS_LOGIN: "yes"
-      ZOO_AUTOPURGE_INTERVAL: "1"
-      ZOO_ENABLE_PROMETHEUS_METRICS: "yes"
-      ZOO_PROMETHEUS_METRICS_PORT_NUMBER: "9141"
+      - clickhouse-keeper-data:/var/lib/clickhouse-keeper
+      - ./config/clickhouse-keeper/keeper.yaml:/etc/clickhouse-keeper/keeper.yaml:ro
+    # No ports / expose — internal only
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "curl -s -m 2 http://localhost:8080/commands/ruok | grep error | grep null",
+          "CMD",
+          "clickhouse-keeper-client",
+          "-h",
+          "localhost",
+          "-p",
+          "9181",
+          "-q",
+          "ls",
         ]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 40s
     deploy:
       resources:
         limits:
-          cpus: "${ZOOKEEPER_CPU_LIMIT:-0.50}"
-          memory: ${ZOOKEEPER_MEMORY_LIMIT:-512M}
+          cpus: "${KEEPER_CPU_LIMIT:-0.50}"
+          memory: ${KEEPER_MEMORY_LIMIT:-512M}
         reservations:
-          cpus: "0.10"
           memory: 128M
     logging: *default-logging
 
   # ---------------------------------------------------------------------------
-  # ClickHouse — primary store for traces, metrics, and logs
+  # ClickHouse — telemetry store (traces / metrics / logs)
   # ---------------------------------------------------------------------------
   clickhouse:
-    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-25.5.6}
-    container_name: pn-obs-clickhouse
-    <<: *default-restart
-    tty: true
-    networks:
-      - observability
+    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-25.12.5}
+    restart: unless-stopped
+    <<: *default-security
     depends_on:
+      clickhouse-keeper:
+        condition: service_healthy
       init-clickhouse:
         condition: service_completed_successfully
-      zookeeper:
-        condition: service_healthy
-    volumes:
-      - ./config/clickhouse/config.xml:/etc/clickhouse-server/config.xml:ro
-      - ./config/clickhouse/users.xml:/etc/clickhouse-server/users.xml:ro
-      - ./config/clickhouse/custom-function.xml:/etc/clickhouse-server/custom-function.xml:ro
-      - ./config/clickhouse/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
-      - ./config/clickhouse/config.d/retention.xml:/etc/clickhouse-server/config.d/retention.xml:ro
-      - ./config/clickhouse/config.d/memory.xml:/etc/clickhouse-server/config.d/memory.xml:ro
-      - ./config/clickhouse/user_scripts:/var/lib/clickhouse/user_scripts/
-      - clickhouse-data:/var/lib/clickhouse/
-      - clickhouse-logs:/var/log/clickhouse-server/
     environment:
       CLICKHOUSE_SKIP_USER_SETUP: "1"
+      CLICKHOUSE_CONFIG: /etc/clickhouse-server/config.yaml
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-user-scripts:/var/lib/clickhouse/user_scripts:ro
+      - ./config/clickhouse/config.yaml:/etc/clickhouse-server/config.yaml:ro
+      - ./config/clickhouse/functions.yaml:/etc/clickhouse-server/functions.yaml:ro
     ulimits:
-      nproc: 65535
       nofile:
         soft: 262144
         hard: 262144
+    # No ports — never publish ClickHouse
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "0.0.0.0:8123/ping"]
+      test:
+        ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 10
       start_period: 60s
-    # Intentionally NOT published — internal network only
-    # ports:
-    #   - "8123:8123"
-    #   - "9000:9000"
     deploy:
       resources:
         limits:
-          cpus: "${CLICKHOUSE_CPU_LIMIT:-4.00}"
-          memory: ${CLICKHOUSE_MEMORY_LIMIT:-8G}
+          cpus: "${CLICKHOUSE_CPU_LIMIT:-2.00}"
+          memory: ${CLICKHOUSE_MEMORY_LIMIT:-4G}
         reservations:
-          cpus: "1.00"
-          memory: 2G
+          cpus: "0.50"
+          memory: 1G
     logging: *default-logging
-    labels:
-      polarnova.io/service: clickhouse
-      polarnova.io/component: storage
 
   # ---------------------------------------------------------------------------
-  # Schema migrator — bootstraps / upgrades ClickHouse schemas for SigNoz
+  # Schema migrator (one-shot) — Foundry: ready → bootstrap → sync → async
   # ---------------------------------------------------------------------------
   schema-migrator:
-    image: signoz/signoz-otel-collector:${OTELCOL_VERSION:-v0.144.5}
-    container_name: pn-obs-schema-migrator
+    image: signoz/signoz-otel-collector:${OTELCOL_VERSION:-v0.144.6}
     restart: on-failure
-    networks:
-      - observability
+    <<: *default-security
+    # One-shot migration job. In Coolify UI, exclude from stack health if prompted.
+    labels:
+      polarnova.io/oneshot: "true"
     depends_on:
       clickhouse:
         condition: service_healthy
     environment:
       SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN: tcp://clickhouse:9000
-      SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_CLUSTER: cluster
-      SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_REPLICATION: "true"
       SIGNOZ_OTEL_COLLECTOR_TIMEOUT: 10m
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        /signoz-otel-collector migrate ready &&
         /signoz-otel-collector migrate bootstrap &&
         /signoz-otel-collector migrate sync up &&
         /signoz-otel-collector migrate async up
     logging: *default-logging
 
   # ---------------------------------------------------------------------------
-  # SigNoz — UI, query API, alert manager, dashboards
-  # Coolify domain: observe.polarnova.io → port 8080
+  # PostgreSQL — SigNoz metastore (Foundry default; replaces SQLite)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-16}
+    restart: unless-stopped
+    <<: *default-security
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-signoz}
+      POSTGRES_USER: ${POSTGRES_USER:-signoz}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # No ports — internal only
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "${POSTGRES_CPU_LIMIT:-0.50}"
+          memory: ${POSTGRES_MEMORY_LIMIT:-512M}
+        reservations:
+          memory: 128M
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # SigNoz UI + API — Coolify domain: https://observe.polarnova.io:8080
   # ---------------------------------------------------------------------------
   signoz:
-    image: signoz/signoz:${SIGNOZ_VERSION:-v0.128.0}
-    container_name: pn-obs-signoz
-    <<: *default-restart
-    networks:
-      - observability
+    image: signoz/signoz:${SIGNOZ_VERSION:-v0.134.0}
+    restart: unless-stopped
+    <<: *default-security
     depends_on:
+      postgres:
+        condition: service_healthy
       clickhouse:
         condition: service_healthy
       schema-migrator:
         condition: service_completed_successfully
-    ports:
-      - "${SIGNOZ_HOST_PORT:-8080}:8080"
-    volumes:
-      - signoz-data:/var/lib/signoz/
     environment:
-      SIGNOZ_ALERTMANAGER_PROVIDER: signoz
+      SIGNOZ_SQLSTORE_PROVIDER: postgres
+      SIGNOZ_SQLSTORE_POSTGRES_DSN: postgres://${POSTGRES_USER:-signoz}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-signoz}?sslmode=disable
+      SIGNOZ_TELEMETRYSTORE_PROVIDER: clickhouse
       SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://clickhouse:9000
-      SIGNOZ_SQLSTORE_SQLITE_PATH: /var/lib/signoz/signoz.db
-      SIGNOZ_TOKENIZER_JWT_SECRET: ${SIGNOZ_JWT_SECRET:?Set SIGNOZ_JWT_SECRET in .env}
+      SIGNOZ_ALERTMANAGER_PROVIDER: signoz
+      SIGNOZ_TOKENIZER_JWT_SECRET: ${SIGNOZ_JWT_SECRET:?Set SIGNOZ_JWT_SECRET in Coolify env}
       DOT_METRICS_ENABLED: ${DOT_METRICS_ENABLED:-true}
+    # Coolify Traefik: expose only (do NOT map host ports)
+    expose:
+      - "8080"
     healthcheck:
       test:
-        ["CMD", "wget", "--spider", "-q", "localhost:8080/api/v1/health"]
+        [
+          "CMD",
+          "wget",
+          "--spider",
+          "-q",
+          "http://localhost:8080/api/v1/health",
+        ]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 5
-      start_period: 45s
+      start_period: 60s
     deploy:
       resources:
         limits:
-          cpus: "${SIGNOZ_CPU_LIMIT:-2.00}"
-          memory: ${SIGNOZ_MEMORY_LIMIT:-2G}
+          cpus: "${SIGNOZ_CPU_LIMIT:-1.00}"
+          memory: ${SIGNOZ_MEMORY_LIMIT:-1536M}
         reservations:
-          cpus: "0.25"
           memory: 512M
     logging: *default-logging
     labels:
-      polarnova.io/service: signoz
-      polarnova.io/component: ui
-      # Coolify / Traefik hints (adjust in Coolify UI as needed)
-      coolify.managed: "true"
+      # Hint only — Coolify assigns the real Traefik labels from the UI domain
+      polarnova.io/public: "true"
+      polarnova.io/role: "signoz-ui"
 
   # ---------------------------------------------------------------------------
-  # OpenTelemetry Collector (SigNoz distribution)
-  # Receives OTLP from all PolarNova products and writes to ClickHouse.
-  # Coolify domain: otel.polarnova.io → ports 4317 (gRPC) / 4318 (HTTP)
+  # OpenTelemetry Collector — PRIVATE ingestion (Docker network + Tailscale)
+  # Do NOT assign a public Coolify domain. Do NOT publish 0.0.0.0:4317/4318.
   # ---------------------------------------------------------------------------
   otel-collector:
-    image: signoz/signoz-otel-collector:${OTELCOL_VERSION:-v0.144.5}
-    container_name: pn-obs-otel-collector
-    <<: *default-restart
-    networks:
-      - observability
+    image: signoz/signoz-otel-collector:${OTELCOL_VERSION:-v0.144.6}
+    restart: unless-stopped
+    <<: *default-security
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -250,155 +270,88 @@ services:
         condition: service_completed_successfully
       signoz:
         condition: service_healthy
-    ports:
-      - "${OTLP_GRPC_HOST_PORT:-4317}:4317"
-      - "${OTLP_HTTP_HOST_PORT:-4318}:4318"
-      # Health check endpoint — keep internal unless debugging
-      # - "13133:13133"
-    volumes:
-      - ./config/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
-      - ./config/otel/opamp-config.yaml:/etc/manager-config.yaml:ro
     environment:
-      OTEL_RESOURCE_ATTRIBUTES: host.name=${OTEL_HOST_NAME:-polarnova-observability},os.type=linux,deployment.environment=${DEPLOYMENT_ENVIRONMENT:-production}
+      OTEL_RESOURCE_ATTRIBUTES: host.name=${OTEL_HOST_NAME:-polarnova-observability},os.type=linux,deployment.environment=${DEPLOYMENT_ENVIRONMENT:-production},deployment.environment.name=${DEPLOYMENT_ENVIRONMENT:-production}
       LOW_CARDINAL_EXCEPTION_GROUPING: ${LOW_CARDINAL_EXCEPTION_GROUPING:-false}
       SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN: tcp://clickhouse:9000
-      SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_CLUSTER: cluster
-      SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_REPLICATION: "true"
       SIGNOZ_OTEL_COLLECTOR_TIMEOUT: 10m
+    volumes:
+      - ./config/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+      - ./config/otel/opamp-config.yaml:/etc/opamp-config.yaml:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         /signoz-otel-collector migrate sync check &&
         /signoz-otel-collector \
           --config=/etc/otel-collector-config.yaml \
-          --manager-config=/etc/manager-config.yaml \
+          --manager-config=/etc/opamp-config.yaml \
           --copy-path=/var/tmp/collector-config.yaml
-    # Health endpoint is exposed internally on :13133 (extension health_check).
-    # Avoid image-specific wget/curl dependencies in the healthcheck for Coolify stability.
+    # Internal listeners only — no host publish in this file.
+    # For Tailscale cross-VPS: see docker-compose.tailscale.yml override
+    # or Coolify Ports bound to the Tailscale IP (never 0.0.0.0).
+    expose:
+      - "4317"
+      - "4318"
+      - "13133"
+    # No image healthcheck: Foundry also omits one for the ingester.
+    # Readiness: curl http://otel-collector:13133 from another container / Tailscale host.
     deploy:
       resources:
         limits:
-          cpus: "${OTEL_CPU_LIMIT:-2.00}"
-          memory: ${OTEL_MEMORY_LIMIT:-2G}
+          cpus: "${OTEL_CPU_LIMIT:-1.00}"
+          memory: ${OTEL_MEMORY_LIMIT:-1536M}
         reservations:
-          cpus: "0.25"
           memory: 256M
     logging: *default-logging
     labels:
-      polarnova.io/service: otel-collector
-      polarnova.io/component: ingestion
+      polarnova.io/public: "false"
+      polarnova.io/role: "otlp-ingestion"
 
   # ---------------------------------------------------------------------------
-  # Uptime Kuma — HTTP, SSL, TCP, keyword, ping monitors
-  # Coolify domain: uptime.polarnova.io → port 3001
+  # Uptime Kuma — synthetic monitoring (keep private until auth + domain ready)
+  # Do NOT assign https://uptime.polarnova.io until admin user is created.
   # ---------------------------------------------------------------------------
   uptime-kuma:
-    image: louislam/uptime-kuma:${UPTIME_KUMA_VERSION:-1}
-    container_name: pn-obs-uptime-kuma
-    <<: *default-restart
-    networks:
-      - observability
-    ports:
-      - "${UPTIME_KUMA_HOST_PORT:-3001}:3001"
+    image: louislam/uptime-kuma:${UPTIME_KUMA_VERSION:-1.23.16}
+    restart: unless-stopped
+    <<: *default-security
     volumes:
       - uptime-kuma-data:/app/data
+    expose:
+      - "3001"
     healthcheck:
       test: ["CMD", "extra/healthcheck"]
       interval: 60s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 90s
     deploy:
       resources:
         limits:
-          cpus: "${UPTIME_CPU_LIMIT:-1.00}"
-          memory: ${UPTIME_MEMORY_LIMIT:-512M}
+          cpus: "${UPTIME_CPU_LIMIT:-0.50}"
+          memory: ${UPTIME_MEMORY_LIMIT:-384M}
         reservations:
-          cpus: "0.10"
           memory: 128M
     logging: *default-logging
     labels:
-      polarnova.io/service: uptime-kuma
-      polarnova.io/component: monitoring
-
-  # ===========================================================================
-  # Optional infrastructure exporters (enable with: --profile infra)
-  # Scraped by the OTel Collector prometheus receiver when enabled.
-  # ===========================================================================
-
-  node-exporter:
-    profiles: ["infra"]
-    image: prom/node-exporter:${NODE_EXPORTER_VERSION:-v1.9.1}
-    container_name: pn-obs-node-exporter
-    <<: *default-restart
-    networks:
-      - observability
-    command:
-      - --path.rootfs=/host
-      - --path.procfs=/host/proc
-      - --path.sysfs=/host/sys
-      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
-    volumes:
-      - /:/host:ro,rslave
-    # Not published — scraped internally by otel-collector
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 128M
-    logging: *default-logging
-    labels:
-      polarnova.io/service: node-exporter
-      polarnova.io/component: exporter
-
-  cadvisor:
-    profiles: ["infra"]
-    image: gcr.io/cadvisor/cadvisor:${CADVISOR_VERSION:-v0.52.1}
-    container_name: pn-obs-cadvisor
-    <<: *default-restart
-    networks:
-      - observability
-    privileged: true
-    devices:
-      - /dev/kmsg:/dev/kmsg
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
-    # Not published — scraped internally by otel-collector
-    deploy:
-      resources:
-        limits:
-          cpus: "0.50"
-          memory: 256M
-    logging: *default-logging
-    labels:
-      polarnova.io/service: cadvisor
-      polarnova.io/component: exporter
+      polarnova.io/public: "false"
+      polarnova.io/role: "uptime-kuma"
 
 ###############################################################################
-# Networks — isolated overlay for observability traffic
-###############################################################################
-networks:
-  observability:
-    name: polarnova-observability
-    driver: bridge
-    # Attach Coolify/shared app networks externally if apps run on same host:
-    # external: true
-
-###############################################################################
-# Persistent volumes
+# Volumes — named volumes only (survive redeploy / recreate / reboot)
+# Do NOT bind-mount database data into the Git working tree.
 ###############################################################################
 volumes:
   clickhouse-data:
     name: pn-obs-clickhouse-data
-  clickhouse-logs:
-    name: pn-obs-clickhouse-logs
-  zookeeper-data:
-    name: pn-obs-zookeeper-data
-  signoz-data:
-    name: pn-obs-signoz-data
+  clickhouse-keeper-data:
+    name: pn-obs-clickhouse-keeper-data
+  clickhouse-user-scripts:
+    name: pn-obs-clickhouse-user-scripts
+  postgres-data:
+    name: pn-obs-postgres-data
   uptime-kuma-data:
     name: pn-obs-uptime-kuma-data
+
+# Intentionally NO top-level networks: key.
+# Coolify creates and attaches its own network so Traefik can reach "signoz".

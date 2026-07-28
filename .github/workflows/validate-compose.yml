@@ -14,11 +14,19 @@ jobs:
       - name: Prepare env for validation
         run: |
           cp .env.example .env
-          # Satisfy required secret interpolation without using a real secret in CI
-          sed -i 's/CHANGE_ME_TO_A_LONG_RANDOM_STRING/ci-validation-secret-not-for-production/' .env
+          sed -i 's/CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_BASE64_48/ci-validation-jwt-not-for-production/' .env
+          sed -i 's/CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_BASE64_32/ci-validation-pg-not-for-production/' .env
 
       - name: Docker Compose config
         run: docker compose config --quiet
+
+      - name: Referenced config files exist
+        run: |
+          test -f config/clickhouse/config.yaml
+          test -f config/clickhouse/functions.yaml
+          test -f config/clickhouse-keeper/keeper.yaml
+          test -f config/otel/otel-collector-config.yaml
+          test -f config/otel/opamp-config.yaml
 
       - name: Shellcheck scripts
         uses: ludeeus/action-shellcheck@2.0.0

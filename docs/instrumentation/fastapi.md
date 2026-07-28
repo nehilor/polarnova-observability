@@ -19,7 +19,7 @@ opentelemetry-bootstrap -a install
 
 ```bash
 export OTEL_SERVICE_NAME=foodiiz-api
-export OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.polarnova.io
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 
 opentelemetry-instrument uvicorn app.main:app --host 0.0.0.0 --port 8000

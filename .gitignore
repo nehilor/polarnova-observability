@@ -4,7 +4,7 @@
 !.env.example
 backups/config/env-*.secret
 
-# Backup payloads (keep folder)
+# Backup payloads
 backups/clickhouse/
 backups/volumes/
 backups/config/*.tar.gz
@@ -16,17 +16,11 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
-*.swo
 
-# Python / Node local experiments
+# Local
 __pycache__/
-*.pyc
 node_modules/
 .venv/
 venv/
-
-# Docker override (local only)
 docker-compose.override.yml
-
-# Logs
 *.log

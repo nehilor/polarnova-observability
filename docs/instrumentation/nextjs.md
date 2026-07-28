@@ -38,7 +38,7 @@ See `examples/nextjs/`.
 
 ```bash
 OTEL_SERVICE_NAME=vital-ai-web
-OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.polarnova.io
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 ```
 

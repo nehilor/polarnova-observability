@@ -1,36 +1,42 @@
 #!/usr/bin/env bash
-# Snapshot Docker named volumes used by the observability stack.
-# Requires: docker, gzip. Prefer offline (stack stopped) for consistency.
+# Tar named Docker volumes. Requires stack STOPPED for ClickHouse/Postgres consistency.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck disable=SC1091
-[[ -f "${ROOT_DIR}/.env" ]] && source "${ROOT_DIR}/.env"
+cd "${ROOT_DIR}"
+
+if [[ -f "${ROOT_DIR}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${ROOT_DIR}/.env"
+  set +a
+fi
 
 BACKUP_ROOT="${BACKUP_ROOT:-${ROOT_DIR}/backups}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DEST="${BACKUP_ROOT}/volumes/${STAMP}"
-PROJECT="${COMPOSE_PROJECT_NAME:-polarnova-observability}"
 
 VOLUMES=(
   pn-obs-clickhouse-data
-  pn-obs-clickhouse-logs
-  pn-obs-zookeeper-data
-  pn-obs-signoz-data
+  pn-obs-clickhouse-keeper-data
+  pn-obs-clickhouse-user-scripts
+  pn-obs-postgres-data
   pn-obs-uptime-kuma-data
 )
 
-mkdir -p "${DEST}"
+if docker compose ps --status running --services 2>/dev/null | grep -E 'clickhouse|postgres' >/dev/null; then
+  echo "ERROR: clickhouse/postgres still running. Stop the stack first for consistent volume backups:" >&2
+  echo "  docker compose stop" >&2
+  exit 1
+fi
 
+mkdir -p "${DEST}"
 echo "==> Volume backup → ${DEST}"
-echo "    Tip: for crash-consistent ClickHouse data, stop the stack first:"
-echo "         docker compose -p ${PROJECT} stop"
-echo ""
 
 for vol in "${VOLUMES[@]}"; do
   if ! docker volume inspect "${vol}" >/dev/null 2>&1; then
-    echo "  • skip missing volume: ${vol}"
+    echo "  • skip missing: ${vol}"
     continue
   fi
   echo "  • ${vol}"
@@ -41,15 +47,17 @@ for vol in "${VOLUMES[@]}"; do
     sh -c "tar -czf /backup/${vol}.tar.gz -C /volume ."
 done
 
-cat > "${DEST}/manifest.json" <<EOF
-{
+python3 - <<PY
+import json
+from pathlib import Path
+Path("${DEST}/manifest.json").write_text(json.dumps({
   "timestamp": "${STAMP}",
   "volumes": $(printf '%s\n' "${VOLUMES[@]}" | python3 -c 'import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))'),
-  "type": "docker-volume-tarball"
-}
-EOF
+  "type": "docker-volume-tarball",
+  "consistent": True,
+  "prerequisite": "stack stopped"
+}, indent=2))
+PY
 
 find "${BACKUP_ROOT}/volumes" -mindepth 1 -maxdepth 1 -type d -mtime "+${RETENTION_DAYS}" -exec rm -rf {} + 2>/dev/null || true
-
-echo "==> Volume backup complete: ${DEST}"
-du -sh "${DEST}"
+echo "==> Done ($(du -sh "${DEST}" | awk '{print $1}'))"

@@ -22,7 +22,7 @@ pip install \
 ```bash
 export OTEL_SERVICE_NAME=my-python-service
 export OTEL_SERVICE_NAMESPACE=polarnova
-export OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.polarnova.io
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.version=1.0.0
 ```
