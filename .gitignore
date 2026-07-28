@@ -1,0 +1,32 @@
+# Environment (secrets)
+.env
+.env.*
+!.env.example
+backups/config/env-*.secret
+
+# Backup payloads (keep folder)
+backups/clickhouse/
+backups/volumes/
+backups/config/*.tar.gz
+!backups/.gitkeep
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python / Node local experiments
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+venv/
+
+# Docker override (local only)
+docker-compose.override.yml
+
+# Logs
+*.log

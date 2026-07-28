@@ -1,0 +1,30 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "polarnova-smoke" } },
+          { "key": "service.namespace", "value": { "stringValue": "polarnova" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "polarnova-smoke" },
+          "spans": [
+            {
+              "traceId": "55555555555555555555555555555555",
+              "spanId": "6666666666666666",
+              "name": "smoke-test",
+              "kind": 1,
+              "startTimeUnixNano": "0",
+              "endTimeUnixNano": "1000000",
+              "attributes": [
+                { "key": "polarnova.smoke", "value": { "boolValue": true } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

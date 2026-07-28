@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!--
+  PolarNova retention defaults for ClickHouse MergeTree tables.
+  SigNoz primarily manages TTL via its UI / schema; this file documents
+  server-level defaults and can be extended for custom tables.
+
+  Recommended retention (configure also in SigNoz Settings → Retention):
+    Traces : 7–15 days
+    Metrics: 30 days
+    Logs   : 7–15 days
+-->
+<clickhouse>
+    <merge_tree>
+        <!-- Prefer newer parts; helps with TTL cleanup under load -->
+        <max_delay_to_insert>1</max_delay_to_insert>
+    </merge_tree>
+</clickhouse>

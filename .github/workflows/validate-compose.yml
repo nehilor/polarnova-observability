@@ -1,0 +1,27 @@
+name: Validate Compose
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare env for validation
+        run: |
+          cp .env.example .env
+          # Satisfy required secret interpolation without using a real secret in CI
+          sed -i 's/CHANGE_ME_TO_A_LONG_RANDOM_STRING/ci-validation-secret-not-for-production/' .env
+
+      - name: Docker Compose config
+        run: docker compose config --quiet
+
+      - name: Shellcheck scripts
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: scripts
+        continue-on-error: true

@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!--
+  PolarNova ClickHouse memory & concurrency overrides.
+  Adjust via Coolify host sizing; keep below container memory limit.
+-->
+<clickhouse>
+    <max_concurrent_queries>50</max_concurrent_queries>
+    <max_server_memory_usage_to_ram_ratio>0.75</max_server_memory_usage_to_ram_ratio>
+    <max_thread_pool_size>5000</max_thread_pool_size>
+    <mark_cache_size>536870912</mark_cache_size>
+    <uncompressed_cache_size>268435456</uncompressed_cache_size>
+</clickhouse>
