@@ -25,7 +25,7 @@ Copiar desde `.env.example`. **Obligatorias** (sustituir placeholders):
 
 | Variable | Notas |
 |----------|--------|
-| `SIGNOZ_JWT_SECRET` | `openssl rand -base64 48` |
+| `SIGNOZ_TOKENIZER_JWT_SECRET` | `openssl rand -base64 48` (do **not** also set `SIGNOZ_JWT_SECRET`) |
 | `POSTGRES_PASSWORD` | `openssl rand -base64 32` |
 
 Recomendadas (pueden dejarse los defaults del ejemplo):
@@ -41,6 +41,10 @@ Recomendadas (pueden dejarse los defaults del ejemplo):
 - `DEPLOYMENT_ENVIRONMENT=production`
 
 **No** publicar secretos reales en Git.
+
+**Importante — post-deploy:** abrir `https://observe.polarnova.io` y completar el **signup** del primer admin (crea la org). Hasta entonces no hay org en Postgres; OpAMP no aplica. Este stack usa config OTel **estática** a propósito para que OTLP funcione sin OpAMP.
+
+En Coolify: renombrar `SIGNOZ_JWT_SECRET` → `SIGNOZ_TOKENIZER_JWT_SECRET` y **borrar** la variable vieja (si ambas existen, SigNoz loguea WARN de deprecación).
 
 ## 5. Servicio que recibe `observe.polarnova.io`
 

@@ -30,7 +30,7 @@ replace_placeholder() {
   fi
 }
 
-replace_placeholder "SIGNOZ_JWT_SECRET" "CHANGE_ME_.*" "$(gen)"
+replace_placeholder "SIGNOZ_TOKENIZER_JWT_SECRET" "CHANGE_ME_.*" "$(gen)"
 replace_placeholder "POSTGRES_PASSWORD" "CHANGE_ME_.*" "$(gen)"
 
 echo "Done. Review ${ENV_FILE} locally; configure Coolify env vars separately."

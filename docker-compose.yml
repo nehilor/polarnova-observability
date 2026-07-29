@@ -239,7 +239,9 @@ services:
       SIGNOZ_TELEMETRYSTORE_PROVIDER: clickhouse
       SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://clickhouse:9000
       SIGNOZ_ALERTMANAGER_PROVIDER: signoz
-      SIGNOZ_TOKENIZER_JWT_SECRET: ${SIGNOZ_JWT_SECRET:?Set SIGNOZ_JWT_SECRET in Coolify env}
+      # Coolify injects every env var into the container — use only this name
+      # (SIGNOZ_JWT_SECRET is deprecated and logs a WARN if also present).
+      SIGNOZ_TOKENIZER_JWT_SECRET: ${SIGNOZ_TOKENIZER_JWT_SECRET:?Set SIGNOZ_TOKENIZER_JWT_SECRET in Coolify env}
       DOT_METRICS_ENABLED: ${DOT_METRICS_ENABLED:-true}
     # Coolify Traefik: expose only (do NOT map host ports)
     expose:
@@ -295,18 +297,17 @@ services:
       SIGNOZ_OTEL_COLLECTOR_TIMEOUT: 10m
     volumes:
       - ./config/otel/otel-collector-config.yaml:/config-ro/otel-collector-config.yaml:ro
-      - ./config/otel/opamp-config.yaml:/config-ro/opamp-config.yaml:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -eu
         install -m 644 /config-ro/otel-collector-config.yaml /etc/otel-collector-config.yaml
-        install -m 644 /config-ro/opamp-config.yaml /etc/opamp-config.yaml
         /signoz-otel-collector migrate sync check &&
-        /signoz-otel-collector \
-          --config=/etc/otel-collector-config.yaml \
-          --manager-config=/etc/opamp-config.yaml \
-          --copy-path=/var/tmp/collector-config.yaml
+        /signoz-otel-collector --config=/etc/otel-collector-config.yaml
+    # Static config only (no OpAMP). OpAMP requires a SigNoz org from first-run
+    # signup; without it the server returns "cannot create agent without orgId"
+    # every ~30s and can replace pipelines with nop. Re-enable manager-config
+    # after https://observe.polarnova.io signup if you want remote config.
     # Internal listeners only — no host publish in this file.
     # For Tailscale cross-VPS: see docker-compose.tailscale.yml override
     # or Coolify Ports bound to the Tailscale IP (never 0.0.0.0).
@@ -314,8 +315,16 @@ services:
       - "4317"
       - "4318"
       - "13133"
-    # No image healthcheck: Foundry also omits one for the ingester.
-    # Readiness: curl http://otel-collector:13133 from another container / Tailscale host.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bash -c 'exec 3<>/dev/tcp/127.0.0.1/13133'",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     deploy:
       resources:
         limits:

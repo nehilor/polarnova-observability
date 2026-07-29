@@ -1,1 +1,12 @@
+# Optional OpAMP manager config (NOT used by default compose).
+#
+# Default stack runs the collector with static otel-collector-config.yaml only.
+# OpAMP requires exactly one SigNoz organization (created by first-run signup at
+# https://observe.polarnova.io). Until then the server returns:
+#   cannot create agent without orgId
+# and may replace pipelines with nop.
+#
+# After signup, you can re-enable in docker-compose.yml:
+#   --manager-config=/etc/opamp-config.yaml
+#   --copy-path=/var/tmp/collector-config.yaml
 server_endpoint: ws://signoz:4320/v1/opamp
