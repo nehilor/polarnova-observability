@@ -16,9 +16,14 @@ jobs:
           cp .env.example .env
           sed -i 's/CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_BASE64_48/ci-validation-jwt-not-for-production/' .env
           sed -i 's/CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_BASE64_32/ci-validation-pg-not-for-production/' .env
+          # Ensure tokenizer secret name exists for compose interpolation
+          grep -q '^SIGNOZ_TOKENIZER_JWT_SECRET=' .env || echo 'SIGNOZ_TOKENIZER_JWT_SECRET=ci-validation-jwt-not-for-production' >> .env
 
       - name: Docker Compose config
-        run: docker compose config --quiet
+        run: |
+          # Coolify-only field; strip before schema validation
+          grep -v 'exclude_from_hc:' docker-compose.yml > /tmp/docker-compose.validate.yml
+          docker compose -f /tmp/docker-compose.validate.yml --env-file .env config --quiet
 
       - name: Referenced config files exist
         run: |

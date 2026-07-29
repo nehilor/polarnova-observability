@@ -46,6 +46,12 @@ Recomendadas (pueden dejarse los defaults del ejemplo):
 
 En Coolify: renombrar `SIGNOZ_JWT_SECRET` → `SIGNOZ_TOKENIZER_JWT_SECRET` y **borrar** la variable vieja (si ambas existen, SigNoz loguea WARN de deprecación).
 
+## Status "Degraded (unhealthy)" con servicios OK
+
+Si Coolify muestra **Degraded** pero `observe` responde 200 y los servicios long-running están `healthy`, suele ser por los one-shots `init-clickhouse` / `schema-migrator` (`Exited 0`).
+
+Mitigación: en compose llevan `exclude_from_hc: true` + `restart: "no"` (campo de Coolify). Tras redeploy el stack debe pasar a healthy.
+
 ## 5. Servicio que recibe `observe.polarnova.io`
 
 Servicio Compose: **`signoz`**

@@ -36,8 +36,9 @@ services:
   init-clickhouse:
     image: clickhouse/clickhouse-server:${IMAGE_CLICKHOUSE_TAG:-25.12.5}
     restart: "no"
+    # Coolify: do not count this exited one-shot toward stack Degraded/unhealthy
+    exclude_from_hc: true
     <<: *default-security
-    # One-shot job: exits 0. In Coolify UI, exclude from stack health if prompted.
     labels:
       polarnova.io/oneshot: "true"
     volumes:
@@ -166,9 +167,10 @@ services:
   # ---------------------------------------------------------------------------
   schema-migrator:
     image: signoz/signoz-otel-collector:${IMAGE_OTELCOL_TAG:-v0.144.6}
-    restart: on-failure
+    restart: "no"
+    # Coolify: do not count this exited one-shot toward stack Degraded/unhealthy
+    exclude_from_hc: true
     <<: *default-security
-    # One-shot migration job. In Coolify UI, exclude from stack health if prompted.
     labels:
       polarnova.io/oneshot: "true"
     depends_on:
