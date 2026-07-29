@@ -370,18 +370,15 @@ services:
 ###############################################################################
 # Volumes — named volumes only (survive redeploy / recreate / reboot)
 # Do NOT bind-mount database data into the Git working tree.
+# Do NOT set explicit `name:` — Coolify uses project UUID prefixes
+# (e.g. co4rwa0…_clickhouse-data). Explicit names create empty orphan volumes.
 ###############################################################################
 volumes:
   clickhouse-data:
-    name: pn-obs-clickhouse-data
   clickhouse-keeper-data:
-    name: pn-obs-clickhouse-keeper-data
   clickhouse-user-scripts:
-    name: pn-obs-clickhouse-user-scripts
   postgres-data:
-    name: pn-obs-postgres-data
   uptime-kuma-data:
-    name: pn-obs-uptime-kuma-data
 
 # Intentionally NO top-level networks: key.
 # Coolify creates and attaches its own network so Traefik can reach "signoz".
