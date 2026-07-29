@@ -135,13 +135,13 @@ Mitigación:
 
 Síntoma: `clickhouse` unhealthy / restart loop con `Unable to open YAML configuration file ... (CANNOT_OPEN_FILE)` (exit 76).
 
-Causa: Coolify deja `config/**/*.yaml` como `0640` (owner del deploy). ClickHouse corre como UID no-root y no puede leer el bind mount.
+Causa: Coolify deja `config/**/*.yaml` como `0640` (owner del deploy). ClickHouse corre como UID no-root y no puede leer el bind mount. El one-shot `chmod` sobre `./config` **no basta**: Coolify arranca compose desde `/artifacts/...` pero los bind mounts reales apuntan a `/data/coolify/applications/<uuid>/config`.
 
-Mitigación en compose: el one-shot `fix-config-perms` hace `chmod -R a+rX ./config` antes de Keeper/ClickHouse/OTel.
+Mitigación en compose: cada servicio copia el YAML desde `/config-ro/` a un path `0644` interno (root puede leer el host `0640`) antes de arrancar.
 
 Emergencia manual en el VPS:
 
 ```bash
 chmod -R a+rX /data/coolify/applications/<uuid>/config
-docker restart <clickhouse-container>
+docker compose --project-name <uuid> -f docker-compose.yaml up -d
 ```

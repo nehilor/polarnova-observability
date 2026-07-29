@@ -31,22 +31,6 @@ x-security: &default-security
 
 services:
   # ---------------------------------------------------------------------------
-  # One-shot: Coolify checkout often uses umask 027 (files 0640). ClickHouse /
-  # OTel run as non-root and then fail with CANNOT_OPEN_FILE on bind-mounted YAML.
-  # ---------------------------------------------------------------------------
-  fix-config-perms:
-    image: alpine:3.20
-    restart: "no"
-    <<: *default-security
-    user: "0"
-    labels:
-      polarnova.io/oneshot: "true"
-    volumes:
-      - ./config:/config
-    command: ["chmod", "-R", "a+rX", "/config"]
-    logging: *default-logging
-
-  # ---------------------------------------------------------------------------
   # One-shot: histogramQuantile UDF for SigNoz APM
   # ---------------------------------------------------------------------------
   init-clickhouse:
@@ -88,15 +72,18 @@ services:
     image: clickhouse/clickhouse-keeper:${IMAGE_CLICKHOUSE_TAG:-25.12.5}
     restart: unless-stopped
     <<: *default-security
-    depends_on:
-      fix-config-perms:
-        condition: service_completed_successfully
-    entrypoint:
-      - /usr/bin/clickhouse-keeper
-      - --config-file=/etc/clickhouse-keeper/keeper.yaml
+    # Coolify leaves host YAML as 0640; non-root cannot read bind mounts.
+    # Root copies to a 0644 path inside the container before starting Keeper.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mkdir -p /etc/clickhouse-keeper
+        install -m 644 /config-ro/keeper.yaml /etc/clickhouse-keeper/keeper.yaml
+        exec /usr/bin/clickhouse-keeper --config-file=/etc/clickhouse-keeper/keeper.yaml
     volumes:
       - clickhouse-keeper-data:/var/lib/clickhouse-keeper
-      - ./config/clickhouse-keeper/keeper.yaml:/etc/clickhouse-keeper/keeper.yaml:ro
+      - ./config/clickhouse-keeper/keeper.yaml:/config-ro/keeper.yaml:ro
     # No ports / expose — internal only
     healthcheck:
       test:
@@ -131,8 +118,6 @@ services:
     restart: unless-stopped
     <<: *default-security
     depends_on:
-      fix-config-perms:
-        condition: service_completed_successfully
       clickhouse-keeper:
         condition: service_healthy
       init-clickhouse:
@@ -140,11 +125,20 @@ services:
     environment:
       CLICKHOUSE_SKIP_USER_SETUP: "1"
       CLICKHOUSE_CONFIG: /etc/clickhouse-server/config.yaml
+    # Coolify host YAML is often 0640; ClickHouse drops to non-root and cannot
+    # read bind mounts. Copy as root to 0644 inside the container first.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        install -m 644 /config-ro/config.yaml /etc/clickhouse-server/config.yaml
+        install -m 644 /config-ro/functions.yaml /etc/clickhouse-server/functions.yaml
+        exec /entrypoint.sh
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - clickhouse-user-scripts:/var/lib/clickhouse/user_scripts:ro
-      - ./config/clickhouse/config.yaml:/etc/clickhouse-server/config.yaml:ro
-      - ./config/clickhouse/functions.yaml:/etc/clickhouse-server/functions.yaml:ro
+      - ./config/clickhouse/config.yaml:/config-ro/config.yaml:ro
+      - ./config/clickhouse/functions.yaml:/config-ro/functions.yaml:ro
     ulimits:
       nofile:
         soft: 262144
@@ -285,8 +279,6 @@ services:
     restart: unless-stopped
     <<: *default-security
     depends_on:
-      fix-config-perms:
-        condition: service_completed_successfully
       clickhouse:
         condition: service_healthy
       schema-migrator:
@@ -299,11 +291,14 @@ services:
       SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN: tcp://clickhouse:9000
       SIGNOZ_OTEL_COLLECTOR_TIMEOUT: 10m
     volumes:
-      - ./config/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
-      - ./config/otel/opamp-config.yaml:/etc/opamp-config.yaml:ro
+      - ./config/otel/otel-collector-config.yaml:/config-ro/otel-collector-config.yaml:ro
+      - ./config/otel/opamp-config.yaml:/config-ro/opamp-config.yaml:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        set -eu
+        install -m 644 /config-ro/otel-collector-config.yaml /etc/otel-collector-config.yaml
+        install -m 644 /config-ro/opamp-config.yaml /etc/opamp-config.yaml
         /signoz-otel-collector migrate sync check &&
         /signoz-otel-collector \
           --config=/etc/otel-collector-config.yaml \
