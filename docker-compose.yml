@@ -243,6 +243,8 @@ services:
       # (SIGNOZ_JWT_SECRET is deprecated and logs a WARN if also present).
       SIGNOZ_TOKENIZER_JWT_SECRET: ${SIGNOZ_TOKENIZER_JWT_SECRET:?Set SIGNOZ_TOKENIZER_JWT_SECRET in Coolify env}
       DOT_METRICS_ENABLED: ${DOT_METRICS_ENABLED:-true}
+      # Avoid startup ERROR when tracker path is empty (SigNoz/prometheus quirk)
+      SIGNOZ_PROMETHEUS_ACTIVE__QUERY__TRACKER_ENABLED: "false"
     # Coolify Traefik: expose only (do NOT map host ports)
     expose:
       - "8080"
