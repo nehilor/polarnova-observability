@@ -278,6 +278,9 @@ services:
     image: signoz/signoz-otel-collector:${IMAGE_OTELCOL_TAG:-v0.144.6}
     restart: unless-stopped
     <<: *default-security
+    # Image default USER=10001 cannot read Coolify 0640 bind mounts; start as
+    # root to copy configs to 0644, then run the collector (private OTLP only).
+    user: "0"
     depends_on:
       clickhouse:
         condition: service_healthy
