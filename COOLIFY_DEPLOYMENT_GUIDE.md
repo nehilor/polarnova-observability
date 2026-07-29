@@ -30,11 +30,11 @@ Copiar desde `.env.example`. **Obligatorias** (sustituir placeholders):
 
 Recomendadas (pueden dejarse los defaults del ejemplo):
 
-- `SIGNOZ_VERSION=v0.134.0`
-- `OTELCOL_VERSION=v0.144.6`
-- `CLICKHOUSE_VERSION=25.12.5`
-- `POSTGRES_VERSION=16`
-- `UPTIME_KUMA_VERSION=1.23.16`
+- `IMAGE_SIGNOZ_TAG=v0.134.0` (**no** uses `SIGNOZ_VERSION` — colisiona con SigNoz)
+- `IMAGE_OTELCOL_TAG=v0.144.6`
+- `IMAGE_CLICKHOUSE_TAG=25.12.5`
+- `IMAGE_POSTGRES_TAG=16`
+- `IMAGE_UPTIME_KUMA_TAG=1.23.16`
 - `POSTGRES_DB=signoz`
 - `POSTGRES_USER=signoz`
 - Límites de CPU/RAM del `.env.example`
@@ -114,8 +114,19 @@ Comprobaciones esperadas:
 
 1. **No** borrar volúmenes (`docker compose down -v` destruye datos).
 2. Antes de upgrades: `./scripts/backup-all.sh` y, con stack parado, `./scripts/backup-volumes.sh`.
-3. Rollback de imágenes: restaurar tags anteriores en env (`SIGNOZ_VERSION`, etc.) → Redeploy.
+3. Rollback de imágenes: restaurar tags anteriores en env (`IMAGE_SIGNOZ_TAG`, etc.) → Redeploy.
 4. Rollback de datos: `docker compose stop` → `./scripts/restore-volume.sh …` → `docker compose up -d`.
 5. Verificar con `./scripts/health-check.sh` y login UI.
 
 Ver también: [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md), [SECURITY.md](SECURITY.md).
+
+## Incidente conocido: bind mounts convertidos en directorios
+
+Si Coolify crea rutas como `config/.../keeper.yaml` como **directorios vacíos**, ClickHouse Keeper hace segfault (exit 139).
+
+Causa: Docker/Coolify materializa el path del bind mount como directorio cuando el fichero no existe en el checkout desplegado.
+
+Mitigación:
+1. Asegurar que los YAML de `config/` están en el commit desplegado.
+2. Tras un deploy roto: borrar los stubs-directorio, copiar los ficheros reales y `docker compose up -d --force-recreate`.
+3. Nunca usar variables de entorno `SIGNOZ_VERSION` (colisiona con la config interna de SigNoz). Usar `IMAGE_SIGNOZ_TAG`.

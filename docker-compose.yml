@@ -34,7 +34,7 @@ services:
   # One-shot: histogramQuantile UDF for SigNoz APM
   # ---------------------------------------------------------------------------
   init-clickhouse:
-    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-25.12.5}
+    image: clickhouse/clickhouse-server:${IMAGE_CLICKHOUSE_TAG:-25.12.5}
     restart: "no"
     <<: *default-security
     # One-shot job: exits 0. In Coolify UI, exclude from stack health if prompted.
@@ -69,7 +69,7 @@ services:
   # ClickHouse Keeper (Foundry default telemetry keeper — replaces ZooKeeper)
   # ---------------------------------------------------------------------------
   clickhouse-keeper:
-    image: clickhouse/clickhouse-keeper:${CLICKHOUSE_VERSION:-25.12.5}
+    image: clickhouse/clickhouse-keeper:${IMAGE_CLICKHOUSE_TAG:-25.12.5}
     restart: unless-stopped
     <<: *default-security
     entrypoint:
@@ -108,7 +108,7 @@ services:
   # ClickHouse — telemetry store (traces / metrics / logs)
   # ---------------------------------------------------------------------------
   clickhouse:
-    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-25.12.5}
+    image: clickhouse/clickhouse-server:${IMAGE_CLICKHOUSE_TAG:-25.12.5}
     restart: unless-stopped
     <<: *default-security
     depends_on:
@@ -150,7 +150,7 @@ services:
   # Schema migrator (one-shot) — Foundry: ready → bootstrap → sync → async
   # ---------------------------------------------------------------------------
   schema-migrator:
-    image: signoz/signoz-otel-collector:${OTELCOL_VERSION:-v0.144.6}
+    image: signoz/signoz-otel-collector:${IMAGE_OTELCOL_TAG:-v0.144.6}
     restart: on-failure
     <<: *default-security
     # One-shot migration job. In Coolify UI, exclude from stack health if prompted.
@@ -175,7 +175,7 @@ services:
   # PostgreSQL — SigNoz metastore (Foundry default; replaces SQLite)
   # ---------------------------------------------------------------------------
   postgres:
-    image: postgres:${POSTGRES_VERSION:-16}
+    image: postgres:${IMAGE_POSTGRES_TAG:-16}
     restart: unless-stopped
     <<: *default-security
     environment:
@@ -208,7 +208,7 @@ services:
   # SigNoz UI + API — Coolify domain: https://observe.polarnova.io:8080
   # ---------------------------------------------------------------------------
   signoz:
-    image: signoz/signoz:${SIGNOZ_VERSION:-v0.134.0}
+    image: signoz/signoz:${IMAGE_SIGNOZ_TAG:-v0.134.0}
     restart: unless-stopped
     <<: *default-security
     depends_on:
@@ -260,7 +260,7 @@ services:
   # Do NOT assign a public Coolify domain. Do NOT publish 0.0.0.0:4317/4318.
   # ---------------------------------------------------------------------------
   otel-collector:
-    image: signoz/signoz-otel-collector:${OTELCOL_VERSION:-v0.144.6}
+    image: signoz/signoz-otel-collector:${IMAGE_OTELCOL_TAG:-v0.144.6}
     restart: unless-stopped
     <<: *default-security
     depends_on:
@@ -312,7 +312,7 @@ services:
   # Do NOT assign https://uptime.polarnova.io until admin user is created.
   # ---------------------------------------------------------------------------
   uptime-kuma:
-    image: louislam/uptime-kuma:${UPTIME_KUMA_VERSION:-1.23.16}
+    image: louislam/uptime-kuma:${IMAGE_UPTIME_KUMA_TAG:-1.23.16}
     restart: unless-stopped
     <<: *default-security
     volumes:
