@@ -130,3 +130,18 @@ Mitigación:
 1. Asegurar que los YAML de `config/` están en el commit desplegado.
 2. Tras un deploy roto: borrar los stubs-directorio, copiar los ficheros reales y `docker compose up -d --force-recreate`.
 3. Nunca usar variables de entorno `SIGNOZ_VERSION` (colisiona con la config interna de SigNoz). Usar `IMAGE_SIGNOZ_TAG`.
+
+## Incidente conocido: YAML 0640 → ClickHouse `CANNOT_OPEN_FILE`
+
+Síntoma: `clickhouse` unhealthy / restart loop con `Unable to open YAML configuration file ... (CANNOT_OPEN_FILE)` (exit 76).
+
+Causa: Coolify deja `config/**/*.yaml` como `0640` (owner del deploy). ClickHouse corre como UID no-root y no puede leer el bind mount.
+
+Mitigación en compose: el one-shot `fix-config-perms` hace `chmod -R a+rX ./config` antes de Keeper/ClickHouse/OTel.
+
+Emergencia manual en el VPS:
+
+```bash
+chmod -R a+rX /data/coolify/applications/<uuid>/config
+docker restart <clickhouse-container>
+```

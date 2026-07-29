@@ -31,6 +31,22 @@ x-security: &default-security
 
 services:
   # ---------------------------------------------------------------------------
+  # One-shot: Coolify checkout often uses umask 027 (files 0640). ClickHouse /
+  # OTel run as non-root and then fail with CANNOT_OPEN_FILE on bind-mounted YAML.
+  # ---------------------------------------------------------------------------
+  fix-config-perms:
+    image: alpine:3.20
+    restart: "no"
+    <<: *default-security
+    user: "0"
+    labels:
+      polarnova.io/oneshot: "true"
+    volumes:
+      - ./config:/config
+    command: ["chmod", "-R", "a+rX", "/config"]
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
   # One-shot: histogramQuantile UDF for SigNoz APM
   # ---------------------------------------------------------------------------
   init-clickhouse:
@@ -72,6 +88,9 @@ services:
     image: clickhouse/clickhouse-keeper:${IMAGE_CLICKHOUSE_TAG:-25.12.5}
     restart: unless-stopped
     <<: *default-security
+    depends_on:
+      fix-config-perms:
+        condition: service_completed_successfully
     entrypoint:
       - /usr/bin/clickhouse-keeper
       - --config-file=/etc/clickhouse-keeper/keeper.yaml
@@ -112,6 +131,8 @@ services:
     restart: unless-stopped
     <<: *default-security
     depends_on:
+      fix-config-perms:
+        condition: service_completed_successfully
       clickhouse-keeper:
         condition: service_healthy
       init-clickhouse:
@@ -264,6 +285,8 @@ services:
     restart: unless-stopped
     <<: *default-security
     depends_on:
+      fix-config-perms:
+        condition: service_completed_successfully
       clickhouse:
         condition: service_healthy
       schema-migrator:
