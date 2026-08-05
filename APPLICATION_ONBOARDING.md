@@ -11,6 +11,30 @@ Signals: traces, metrics, logs via OpenTelemetry.
 | Cross-VPS via Tailscale | `http://<obs-tailscale-ip>:4318` |
 | Public HTTPS OTLP | **Not provided** (by design) |
 
+> **Reaching the collector from a Coolify app (verified pattern — Vital AI).**
+> The collector only lives on this stack's own resource network; apps on the
+> shared `coolify` network can NOT resolve `otel-collector` by default. Join
+> your app's telemetry-emitting services to this stack's network as an
+> external network in your compose:
+>
+> ```yaml
+> services:
+>   backend:
+>     networks:
+>       - coolify
+>       - observability
+> networks:
+>   coolify:
+>     external: true
+>   observability:
+>     external: true
+>     name: ${OBSERVABILITY_NETWORK:-<observability-stack-resource-uuid>}
+> ```
+>
+> The stack's resource network name is its Coolify resource UUID (find it with
+> `docker inspect <otel-collector-container> --format '{{json .NetworkSettings.Networks}}'`).
+> OTLP ports stay unpublished — traffic never leaves the Docker host.
+
 ```bash
 OTEL_EXPORTER_OTLP_ENDPOINT=http://<endpoint-above>
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
