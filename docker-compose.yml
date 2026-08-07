@@ -28,6 +28,17 @@ x-logging: &default-logging
 x-security: &default-security
   security_opt:
     - no-new-privileges:true
+  # Disable IPv6 inside every stack container. Docker 27 auto-assigns an IPv6
+  # ULA (fd4d::/64) even on IPv4-only networks and its embedded DNS returns the
+  # AAAA record first, so ClickHouse resolved `clickhouse-keeper` (and peers) to
+  # IPv6 and hit "ZooKeeper connection refused (code 999)" — the keeper, and all
+  # services, listen on IPv4 (0.0.0.0). Dropping IPv6 from the containers makes
+  # all intra-stack resolution IPv4-only, matching how this stack worked before
+  # the host's Docker gained IPv6 auto-ULA. No custom network needed (Coolify
+  # forbids that), no daemon restart, no impact on other stacks.
+  sysctls:
+    - net.ipv6.conf.all.disable_ipv6=1
+    - net.ipv6.conf.default.disable_ipv6=1
 
 services:
   # ---------------------------------------------------------------------------

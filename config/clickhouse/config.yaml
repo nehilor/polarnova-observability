@@ -14,12 +14,7 @@ http_port: 8123
 interserver_http_port: 9009
 latency_log:
   ttl: event_date + INTERVAL 1 DAY DELETE
-listen_host: '::'
-# The Coolify Docker network resolves service hostnames to IPv6, but ClickHouse
-# Keeper does not serve IPv6 on 9181 → CH's ZooKeeper client got "Connection
-# refused (code 999)" and every schema-migration failed. Force ClickHouse to
-# resolve names to IPv4 so it reaches the keeper on its working IPv4 socket.
-dns_allow_resolve_names_to_ipv4_addresses: true
+listen_host: 0.0.0.0
 logger:
   console: 1
   count: 10
