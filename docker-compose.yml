@@ -301,6 +301,11 @@ services:
       SIGNOZ_OTEL_COLLECTOR_TIMEOUT: 10m
     volumes:
       - ./config/otel/otel-collector-config.yaml:/config-ro/otel-collector-config.yaml:ro
+      # Fleet-wide container logs: the collector tails every container's stdout
+      # written by the Docker json-file driver on this host. Read-only. Enables
+      # the filelog/dockercontainers receiver in otel-collector-config.yaml so
+      # ALL apps (foodiiz, voxpilot, vital, …) ship logs with zero per-app work.
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |

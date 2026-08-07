@@ -26,6 +26,37 @@ receivers:
         endpoint: 0.0.0.0:4318
         # No public CORS — ingestion is private (Tailscale / Docker network)
 
+  # Fleet-wide container logs. Tails every container's Docker json-file log on
+  # this host (mounted read-only in the compose). Zero per-app work: foodiiz,
+  # voxpilot, vital, etc. all ship stdout/stderr here. Logs are tagged with
+  # container.id (the log file only carries the id, not the name); for friendly
+  # per-app service.name + trace correlation, have each app export logs via OTLP
+  # with OTEL_SERVICE_NAME instead of/in addition to this.
+  filelog/dockercontainers:
+    include:
+      - /var/lib/docker/containers/*/*-json.log
+    start_at: end
+    include_file_path: true
+    include_file_name: false
+    operators:
+      - type: json_parser
+        id: parser-docker
+        timestamp:
+          parse_from: attributes.time
+          layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+      - type: regex_parser
+        id: extract-container-id
+        parse_from: attributes["log.file.path"]
+        regex: '^/var/lib/docker/containers/(?P<container_id>[0-9a-f]+)/.*$'
+      - type: move
+        from: attributes.container_id
+        to: resource["container.id"]
+      - type: move
+        from: attributes.log
+        to: body
+      - type: remove
+        field: attributes.time
+
 processors:
   memory_limiter:
     check_interval: 2s
@@ -221,7 +252,7 @@ service:
       exporters: [signozclickhousemetrics, metadataexporter, signozmeter]
 
     logs:
-      receivers: [otlp]
+      receivers: [otlp, filelog/dockercontainers]
       processors:
         [memory_limiter, attributes/redact, resource/defaults, batch]
       exporters: [clickhouselogsexporter, metadataexporter, signozmeter]
