@@ -17,13 +17,12 @@ keeper_server:
   server_id: 0
   snapshot_storage_path: /var/lib/clickhouse-keeper/coordination/snapshots
   tcp_port: 9181
-# Dual-stack: the Coolify Docker network resolves the `clickhouse-keeper`
-# hostname to an IPv6 address, so ClickHouse connected to [IPv6]:9181 while the
-# keeper only listened on IPv4 (0.0.0.0) → "Connection refused / ZooKeeper store
-# not ready (code 999)" and the schema-migrator failed. Listen on IPv4 AND IPv6.
-listen_host:
-  - 0.0.0.0
-  - '::'
+# The Coolify Docker network resolves the `clickhouse-keeper` hostname to an
+# IPv6 address, so ClickHouse connected to [IPv6]:9181 while the keeper only
+# listened on IPv4 (0.0.0.0) → "Connection refused / ZooKeeper store not ready
+# (code 999)" and the schema-migrator failed. `::` binds dual-stack (both IPv4
+# and IPv6) so the IPv6 connection from ClickHouse succeeds.
+listen_host: '::'
 logger:
   console: true
   level: information
